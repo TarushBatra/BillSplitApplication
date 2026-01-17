@@ -1,0 +1,83 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: billsplit-db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-billsplit}
+      POSTGRES_USER: ${POSTGRES_USER:-billsplit_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-billsplit_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - billsplit-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billsplit_user -d billsplit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Spring Boot Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: billsplit-backend
+    env_file:
+      - .env
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/billsplit
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-billsplit_user}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-billsplit_password}
+      JWT_SECRET: ${JWT_SECRET:-}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECURITY_LOG_LEVEL: ${SECURITY_LOG_LEVEL:-WARN}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
+      RATE_LIMIT_WINDOW_MINUTES: ${RATE_LIMIT_WINDOW_MINUTES:-1}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - billsplit-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: billsplit-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - billsplit-network
+    env_file:
+      - .env
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8080/api}
+
+volumes:
+  postgres_data:
+
+networks:
+  billsplit-network:
+    driver: bridge
+
