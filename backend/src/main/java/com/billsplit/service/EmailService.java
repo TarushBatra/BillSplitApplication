@@ -100,14 +100,24 @@ public class EmailService {
                     "2. Register or login with this email: " + sanitizedEmail + "\n" +
                     "3. Go to your Dashboard to see and accept pending invitations\n\n" +
                     "Best regards,\nBillSplit Team");
-            message.setFrom(fromEmail);
             
+            // Gmail requires the "from" address to match the authenticated email
+            // If fromEmail is set, use it; otherwise use MAIL_USERNAME
+            String fromAddress = fromEmail != null && !fromEmail.trim().isEmpty() ? fromEmail.trim() : null;
+            if (fromAddress == null) {
+                logger.error("Cannot send email: fromEmail is not configured. Set MAIL_USERNAME in environment variables.");
+                return;
+            }
+            message.setFrom(fromAddress);
+            
+            logger.info("Sending email from {} to {} via SMTP", fromAddress, sanitizedEmail);
             mailSender.send(message);
-            logger.info("Group invitation email sent successfully to {}", sanitizedEmail);
+            logger.info("Group invitation email sent successfully to {} (from: {})", sanitizedEmail, fromAddress);
         } catch (org.springframework.mail.MailAuthenticationException e) {
-            logger.error("Email authentication failed. Check MAIL_USERNAME and MAIL_PASSWORD. Error: {}", e.getMessage());
+            logger.error("Email authentication failed. Check MAIL_USERNAME and MAIL_PASSWORD. Error: {}", e.getMessage(), e);
         } catch (org.springframework.mail.MailSendException e) {
-            logger.error("Failed to send email to {}. Check SMTP settings and network. Error: {}", sanitizedEmail, e.getMessage());
+            logger.error("Failed to send email to {}. SMTP error: {}. Check: 1) MAIL_USERNAME matches authenticated email, 2) App password is correct, 3) Gmail security settings. Full error: {}", 
+                    sanitizedEmail, e.getMessage(), e);
         } catch (Exception e) {
             logger.error("Failed to send group invitation email to {}: {} - {}", sanitizedEmail, e.getClass().getSimpleName(), e.getMessage(), e);
         }
