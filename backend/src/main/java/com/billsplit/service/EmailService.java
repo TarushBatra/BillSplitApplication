@@ -72,7 +72,9 @@ public class EmailService {
     
     public void sendGroupInvitation(String toEmail, String groupName, String inviterName) {
         if (!isEmailConfigured()) {
-            logger.info("Email not configured. Skipping invitation email to {}", toEmail);
+            logger.warn("Email not configured. MAIL_USERNAME: {}, mailSender: {}", 
+                    fromEmail != null && !fromEmail.isEmpty() ? "SET" : "NOT SET", 
+                    mailSender != null ? "AVAILABLE" : "NULL");
             return;
         }
         
@@ -85,6 +87,8 @@ public class EmailService {
         
         String safeGroupName = safeString(groupName, "Unknown Group");
         String safeInviterName = safeString(inviterName, "Someone");
+        
+        logger.info("Attempting to send invitation email to {} for group {}", sanitizedEmail, safeGroupName);
         
         try {
             SimpleMailMessage message = new SimpleMailMessage();
@@ -100,8 +104,12 @@ public class EmailService {
             
             mailSender.send(message);
             logger.info("Group invitation email sent successfully to {}", sanitizedEmail);
+        } catch (org.springframework.mail.MailAuthenticationException e) {
+            logger.error("Email authentication failed. Check MAIL_USERNAME and MAIL_PASSWORD. Error: {}", e.getMessage());
+        } catch (org.springframework.mail.MailSendException e) {
+            logger.error("Failed to send email to {}. Check SMTP settings and network. Error: {}", sanitizedEmail, e.getMessage());
         } catch (Exception e) {
-            logger.error("Failed to send group invitation email to {}: {}", sanitizedEmail, e.getMessage(), e);
+            logger.error("Failed to send group invitation email to {}: {} - {}", sanitizedEmail, e.getClass().getSimpleName(), e.getMessage(), e);
         }
     }
     
