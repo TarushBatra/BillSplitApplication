@@ -1,6 +1,8 @@
 # 🌐 Domain Setup Guide - Production Email Configuration
 
-This guide will help you set up a custom domain for professional email sending with Resend.
+> **Note:** This guide is **optional**. For personal projects, you can use `onboarding@resend.dev` without any domain setup. See `PERSONAL_PROJECT_SETUP.md` for the simpler setup.
+
+This guide will help you set up a custom domain for professional email sending with Resend (recommended for production/public apps).
 
 ---
 
