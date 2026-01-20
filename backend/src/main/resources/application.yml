@@ -36,8 +36,8 @@ spring:
           connectiontimeout: 10000
           timeout: 10000
           writetimeout: 10000
-          debug: false
-        debug: false
+          debug: true
+        debug: true
 
 server:
   port: 8080

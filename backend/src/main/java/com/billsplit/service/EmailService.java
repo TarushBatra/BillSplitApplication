@@ -110,9 +110,15 @@ public class EmailService {
             }
             message.setFrom(fromAddress);
             
-            logger.info("Sending email from {} to {} via SMTP", fromAddress, sanitizedEmail);
+            logger.info("Sending email from {} to {} via SMTP (Gmail)", fromAddress, sanitizedEmail);
+            logger.info("Email subject: {}", message.getSubject());
+            logger.info("Email text length: {} characters", message.getText() != null ? message.getText().length() : 0);
+            
             mailSender.send(message);
+            
+            logger.info("SMTP send() completed successfully. Email should be in Gmail's sent folder.");
             logger.info("Group invitation email sent successfully to {} (from: {})", sanitizedEmail, fromAddress);
+            logger.warn("NOTE: If email not received, check: 1) Gmail Sent folder, 2) Spam folder, 3) Gmail may be blocking emails from Render IPs");
         } catch (org.springframework.mail.MailAuthenticationException e) {
             logger.error("Email authentication failed. Check MAIL_USERNAME and MAIL_PASSWORD. Error: {}", e.getMessage(), e);
         } catch (org.springframework.mail.MailSendException e) {
