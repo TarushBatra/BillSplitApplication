@@ -4,7 +4,6 @@ import com.billsplit.service.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,13 +17,13 @@ import java.util.Map;
 public class HealthController {
     
     @Autowired(required = false)
-    private JavaMailSender mailSender;
-    
-    @Autowired(required = false)
     private EmailService emailService;
     
-    @Value("${spring.mail.username:}")
-    private String mailUsername;
+    @Value("${resend.api.key:}")
+    private String resendApiKey;
+    
+    @Value("${resend.from.email:}")
+    private String resendFromEmail;
     
     @GetMapping
     public ResponseEntity<Map<String, String>> health() {
@@ -32,11 +31,13 @@ public class HealthController {
         response.put("status", "UP");
         response.put("service", "BillSplit Backend");
         
-        // Email configuration status
-        boolean emailConfigured = mailSender != null && mailUsername != null && !mailUsername.trim().isEmpty();
+        // Email configuration status (Resend)
+        boolean emailConfigured = resendApiKey != null && !resendApiKey.trim().isEmpty() 
+            && resendFromEmail != null && !resendFromEmail.trim().isEmpty();
         response.put("email_configured", String.valueOf(emailConfigured));
-        response.put("mail_username_set", mailUsername != null && !mailUsername.trim().isEmpty() ? "YES" : "NO");
-        response.put("mail_sender_available", mailSender != null ? "YES" : "NO");
+        response.put("resend_api_key_set", resendApiKey != null && !resendApiKey.trim().isEmpty() ? "YES" : "NO");
+        response.put("resend_from_email_set", resendFromEmail != null && !resendFromEmail.trim().isEmpty() ? "YES" : "NO");
+        response.put("email_provider", "Resend API");
         
         return ResponseEntity.ok(response);
     }

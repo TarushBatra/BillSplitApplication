@@ -22,22 +22,12 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
   
-  mail:
-    host: smtp.gmail.com
-    port: 587
-    username: ${MAIL_USERNAME:}
-    password: ${MAIL_PASSWORD:}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-          connectiontimeout: 10000
-          timeout: 10000
-          writetimeout: 10000
-          debug: true
-        debug: true
+# Email Configuration - Using Resend API (HTTP-based, works on Render)
+resend:
+  api:
+    key: ${RESEND_API_KEY:}
+  from:
+    email: ${RESEND_FROM_EMAIL:}
 
 server:
   port: 8080

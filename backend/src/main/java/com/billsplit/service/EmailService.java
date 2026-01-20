@@ -9,20 +9,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 @Service
 public class EmailService {
     
     private static final Logger logger = LoggerFactory.getLogger(EmailService.class);
-    
-    @Autowired(required = false)
-    private JavaMailSender mailSender;
+    private static final String RESEND_API_URL = "https://api.resend.com/emails";
     
     @Autowired
     private GroupRepository groupRepository;
@@ -30,11 +30,16 @@ public class EmailService {
     @Autowired
     private GroupMemberRepository groupMemberRepository;
     
-    @Value("${spring.mail.username:}")
+    @Value("${resend.api.key:}")
+    private String resendApiKey;
+    
+    @Value("${resend.from.email:}")
     private String fromEmail;
     
     @Value("${app.url:http://localhost:3000}")
     private String appUrl;
+    
+    private final RestTemplate restTemplate = new RestTemplate();
     
     // Email validation pattern (RFC 5322 compliant)
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
@@ -42,7 +47,8 @@ public class EmailService {
     );
     
     private boolean isEmailConfigured() {
-        return mailSender != null && fromEmail != null && !fromEmail.trim().isEmpty();
+        return resendApiKey != null && !resendApiKey.trim().isEmpty() 
+            && fromEmail != null && !fromEmail.trim().isEmpty();
     }
     
     /**
@@ -70,98 +76,105 @@ public class EmailService {
         return value.trim();
     }
     
-    public void sendGroupInvitation(String toEmail, String groupName, String inviterName) {
+    /**
+     * Sends an email using Resend API
+     * @param to Recipient email address
+     * @param subject Email subject
+     * @param text Email body text
+     * @return true if email was sent successfully, false otherwise
+     */
+    private boolean sendEmail(String to, String subject, String text) {
         if (!isEmailConfigured()) {
-            logger.warn("Email not configured. MAIL_USERNAME: {}, mailSender: {}", 
-                    fromEmail != null && !fromEmail.isEmpty() ? "SET" : "NOT SET", 
-                    mailSender != null ? "AVAILABLE" : "NULL");
-            return;
+            logger.warn("Email not configured. RESEND_API_KEY: {}, RESEND_FROM_EMAIL: {}", 
+                    resendApiKey != null && !resendApiKey.isEmpty() ? "SET" : "NOT SET",
+                    fromEmail != null && !fromEmail.isEmpty() ? "SET" : "NOT SET");
+            return false;
         }
         
         // Validate and sanitize inputs
-        String sanitizedEmail = toEmail != null ? toEmail.trim() : null;
+        String sanitizedEmail = to != null ? to.trim() : null;
         if (!isValidEmail(sanitizedEmail)) {
-            logger.warn("Invalid email address for group invitation: {}", toEmail);
-            return;
+            logger.warn("Invalid email address: {}", to);
+            return false;
         }
         
-        String safeGroupName = safeString(groupName, "Unknown Group");
-        String safeInviterName = safeString(inviterName, "Someone");
-        
-        logger.info("Attempting to send invitation email to {} for group {}", sanitizedEmail, safeGroupName);
-        
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setTo(sanitizedEmail);
-            message.setSubject("Invitation to join group: " + safeGroupName);
-            message.setText("Hello,\n\n" + safeInviterName + " has invited you to join the group \"" + safeGroupName + "\" on BillSplit.\n\n" +
-                    "To accept this invitation:\n" +
-                    "1. Visit: " + appUrl + "\n" +
-                    "2. Register or login with this email: " + sanitizedEmail + "\n" +
-                    "3. Go to your Dashboard to see and accept pending invitations\n\n" +
-                    "Best regards,\nBillSplit Team");
+            // Prepare request headers
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(resendApiKey.trim());
             
-            // Gmail requires the "from" address to match the authenticated email
-            // If fromEmail is set, use it; otherwise use MAIL_USERNAME
-            String fromAddress = fromEmail != null && !fromEmail.trim().isEmpty() ? fromEmail.trim() : null;
-            if (fromAddress == null) {
-                logger.error("Cannot send email: fromEmail is not configured. Set MAIL_USERNAME in environment variables.");
-                return;
+            // Prepare request body
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("from", fromEmail.trim());
+            requestBody.put("to", sanitizedEmail);
+            requestBody.put("subject", subject);
+            requestBody.put("text", text);
+            
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+            
+            logger.info("Sending email via Resend API to {} (from: {})", sanitizedEmail, fromEmail);
+            
+            // Make API call
+            @SuppressWarnings("unchecked")
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                RESEND_API_URL,
+                HttpMethod.POST,
+                request,
+                (Class<Map<String, Object>>) (Class<?>) Map.class
+            );
+            
+            if (response.getStatusCode().is2xxSuccessful()) {
+                logger.info("Email sent successfully to {} via Resend API", sanitizedEmail);
+                return true;
+            } else {
+                logger.error("Failed to send email to {}. Resend API returned status: {}", 
+                        sanitizedEmail, response.getStatusCode());
+                return false;
             }
-            message.setFrom(fromAddress);
-            
-            logger.info("Sending email from {} to {} via SMTP (Gmail)", fromAddress, sanitizedEmail);
-            logger.info("Email subject: {}", message.getSubject());
-            logger.info("Email text length: {} characters", message.getText() != null ? message.getText().length() : 0);
-            
-            mailSender.send(message);
-            
-            logger.info("SMTP send() completed successfully. Email should be in Gmail's sent folder.");
-            logger.info("Group invitation email sent successfully to {} (from: {})", sanitizedEmail, fromAddress);
-            logger.warn("NOTE: If email not received, check: 1) Gmail Sent folder, 2) Spam folder, 3) Gmail may be blocking emails from Render IPs");
-        } catch (org.springframework.mail.MailAuthenticationException e) {
-            logger.error("Email authentication failed. Check MAIL_USERNAME and MAIL_PASSWORD. Error: {}", e.getMessage(), e);
-        } catch (org.springframework.mail.MailSendException e) {
-            logger.error("Failed to send email to {}. SMTP error: {}. Check: 1) MAIL_USERNAME matches authenticated email, 2) App password is correct, 3) Gmail security settings. Full error: {}", 
-                    sanitizedEmail, e.getMessage(), e);
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            logger.error("Resend API error (4xx) sending email to {}: Status: {}, Response: {}", 
+                    sanitizedEmail, e.getStatusCode(), e.getResponseBodyAsString(), e);
+            return false;
+        } catch (org.springframework.web.client.HttpServerErrorException e) {
+            logger.error("Resend API error (5xx) sending email to {}: Status: {}, Response: {}", 
+                    sanitizedEmail, e.getStatusCode(), e.getResponseBodyAsString(), e);
+            return false;
         } catch (Exception e) {
-            logger.error("Failed to send group invitation email to {}: {} - {}", sanitizedEmail, e.getClass().getSimpleName(), e.getMessage(), e);
+            logger.error("Failed to send email to {} via Resend API: {} - {}", 
+                    sanitizedEmail, e.getClass().getSimpleName(), e.getMessage(), e);
+            return false;
         }
     }
     
+    public void sendGroupInvitation(String toEmail, String groupName, String inviterName) {
+        String safeGroupName = safeString(groupName, "Unknown Group");
+        String safeInviterName = safeString(inviterName, "Someone");
+        
+        String subject = "Invitation to join group: " + safeGroupName;
+        String text = "Hello,\n\n" + safeInviterName + " has invited you to join the group \"" + safeGroupName + "\" on BillSplit.\n\n" +
+                "To accept this invitation:\n" +
+                "1. Visit: " + appUrl + "\n" +
+                "2. Register or login with this email: " + toEmail + "\n" +
+                "3. Go to your Dashboard to see and accept pending invitations\n\n" +
+                "Best regards,\nBillSplit Team";
+        
+        sendEmail(toEmail, subject, text);
+    }
+    
     public void sendExpenseNotification(String toEmail, String groupName, String expenseDescription, String amount) {
-        if (!isEmailConfigured()) {
-            logger.info("Email not configured. Skipping expense notification email to {}", toEmail);
-            return;
-        }
-        
-        // Validate and sanitize inputs
-        String sanitizedEmail = toEmail != null ? toEmail.trim() : null;
-        if (!isValidEmail(sanitizedEmail)) {
-            logger.warn("Invalid email address for expense notification: {}", toEmail);
-            return;
-        }
-        
         String safeGroupName = safeString(groupName, "Unknown Group");
         String safeDescription = safeString(expenseDescription, "Expense");
         String safeAmount = safeString(amount, "0.00");
         
-        try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setTo(sanitizedEmail);
-            message.setSubject("New expense added to group: " + safeGroupName);
-            message.setText("Hello,\n\nA new expense has been added to the group \"" + safeGroupName + "\":\n\n" +
-                    "Description: " + safeDescription + "\n" +
-                    "Amount: $" + safeAmount + "\n\n" +
-                    "View details: " + appUrl + "\n\n" +
-                    "Best regards,\nBillSplit Team");
-            message.setFrom(fromEmail);
-            
-            mailSender.send(message);
-            logger.info("Expense notification email sent successfully to {}", sanitizedEmail);
-        } catch (Exception e) {
-            logger.error("Failed to send expense notification email to {}: {}", sanitizedEmail, e.getMessage(), e);
-        }
+        String subject = "New expense added to group: " + safeGroupName;
+        String text = "Hello,\n\nA new expense has been added to the group \"" + safeGroupName + "\":\n\n" +
+                "Description: " + safeDescription + "\n" +
+                "Amount: $" + safeAmount + "\n\n" +
+                "View details: " + appUrl + "\n\n" +
+                "Best regards,\nBillSplit Team";
+        
+        sendEmail(toEmail, subject, text);
     }
     
     public void sendSettlementNotifications(Long groupId, List<SettlementTransaction> transactions) {
@@ -203,6 +216,8 @@ public class EmailService {
                                .append("\n");
             }
             
+            String safeGroupName = safeString(group != null ? group.getName() : null, "Unknown Group");
+            
             // Send email to each group member
             for (GroupMember member : members) {
                 // Null safety checks
@@ -221,25 +236,15 @@ public class EmailService {
                     continue;
                 }
                 
-                String safeGroupName = safeString(group != null ? group.getName() : null, "Unknown Group");
                 String safeUserName = safeString(userName, "there");
                 
-                try {
-                    SimpleMailMessage message = new SimpleMailMessage();
-                    message.setTo(sanitizedEmail);
-                    message.setSubject("Settlement Summary: " + safeGroupName);
-                    message.setText("Hello " + safeUserName + ",\n\n" +
-                            settlementSummary.toString() + "\n" +
-                            "View details: " + appUrl + "\n\n" +
-                            "Best regards,\nBillSplit Team");
-                    message.setFrom(fromEmail);
-                    
-                    mailSender.send(message);
-                    logger.info("Settlement notification email sent successfully to {}", sanitizedEmail);
-                } catch (Exception e) {
-                    logger.error("Failed to send settlement notification to {}: {}", 
-                            sanitizedEmail, e.getMessage(), e);
-                }
+                String subject = "Settlement Summary: " + safeGroupName;
+                String text = "Hello " + safeUserName + ",\n\n" +
+                        settlementSummary.toString() + "\n" +
+                        "View details: " + appUrl + "\n\n" +
+                        "Best regards,\nBillSplit Team";
+                
+                sendEmail(sanitizedEmail, subject, text);
             }
         } catch (Exception e) {
             logger.error("Failed to send settlement notifications for group {}: {}", groupId, e.getMessage(), e);
@@ -247,35 +252,14 @@ public class EmailService {
     }
     
     public void sendInvitationRejectionNotification(String toEmail, String groupName, String rejecterName) {
-        if (!isEmailConfigured()) {
-            logger.info("Email not configured. Skipping rejection notification email to {}", toEmail);
-            return;
-        }
-        
-        // Validate and sanitize inputs
-        String sanitizedEmail = toEmail != null ? toEmail.trim() : null;
-        if (!isValidEmail(sanitizedEmail)) {
-            logger.warn("Invalid email address for rejection notification: {}", toEmail);
-            return;
-        }
-        
         String safeGroupName = safeString(groupName, "Unknown Group");
         String safeRejecterName = safeString(rejecterName, "Someone");
         
-        try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setTo(sanitizedEmail);
-            message.setSubject("Invitation Rejected: " + safeGroupName);
-            message.setText("Hello,\n\n" + safeRejecterName + " has rejected your invitation to join the group \"" + safeGroupName + "\" on BillSplit.\n\n" +
-                    "View your groups: " + appUrl + "\n\n" +
-                    "Best regards,\nBillSplit Team");
-            message.setFrom(fromEmail);
-            
-            mailSender.send(message);
-            logger.info("Invitation rejection notification email sent successfully to {}", sanitizedEmail);
-        } catch (Exception e) {
-            logger.error("Failed to send invitation rejection notification email to {}: {}", sanitizedEmail, e.getMessage(), e);
-        }
+        String subject = "Invitation Rejected: " + safeGroupName;
+        String text = "Hello,\n\n" + safeRejecterName + " has rejected your invitation to join the group \"" + safeGroupName + "\" on BillSplit.\n\n" +
+                "View your groups: " + appUrl + "\n\n" +
+                "Best regards,\nBillSplit Team";
+        
+        sendEmail(toEmail, subject, text);
     }
 }
-
