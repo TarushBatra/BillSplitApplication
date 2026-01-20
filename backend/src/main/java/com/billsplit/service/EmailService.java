@@ -36,8 +36,14 @@ public class EmailService {
     @Value("${resend.from.email:}")
     private String fromEmail;
     
+    @Value("${resend.reply.to:}")
+    private String replyToEmail;
+    
     @Value("${app.url:http://localhost:3000}")
     private String appUrl;
+    
+    @Value("${app.name:BillSplit}")
+    private String appName;
     
     private final RestTemplate restTemplate = new RestTemplate();
     
@@ -77,13 +83,82 @@ public class EmailService {
     }
     
     /**
-     * Sends an email using Resend API
+     * Converts plain text to basic HTML format
+     * @param text Plain text content
+     * @return HTML formatted content
+     */
+    private String convertTextToHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+        // Escape HTML and convert newlines to <br>
+        String escaped = text.replace("&", "&amp;")
+                            .replace("<", "&lt;")
+                            .replace(">", "&gt;")
+                            .replace("\n", "<br>");
+        return "<html><body style=\"font-family: Arial, sans-serif; line-height: 1.6; color: #333;\">" +
+               escaped +
+               "</body></html>";
+    }
+    
+    /**
+     * Creates a professional HTML email template
+     * @param title Email title
+     * @param content Main content (HTML)
+     * @param actionText Optional action button text
+     * @param actionUrl Optional action button URL
+     * @return Complete HTML email
+     */
+    private String createHtmlEmailTemplate(String title, String content, String actionText, String actionUrl) {
+        String buttonHtml = "";
+        if (actionText != null && actionUrl != null && !actionText.isEmpty() && !actionUrl.isEmpty()) {
+            buttonHtml = "<div style=\"text-align: center; margin: 30px 0;\">" +
+                        "<a href=\"" + actionUrl + "\" style=\"background-color: #10b981; color: white; " +
+                        "padding: 12px 30px; text-decoration: none; border-radius: 6px; " +
+                        "display: inline-block; font-weight: bold;\">" + actionText + "</a>" +
+                        "</div>";
+        }
+        
+        return "<!DOCTYPE html>" +
+               "<html>" +
+               "<head><meta charset=\"UTF-8\"></head>" +
+               "<body style=\"margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;\">" +
+               "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color: #f5f5f5; padding: 20px;\">" +
+               "<tr><td align=\"center\">" +
+               "<table width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);\">" +
+               "<tr><td style=\"padding: 30px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 8px 8px 0 0;\">" +
+               "<h1 style=\"margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;\">" + appName + "</h1>" +
+               "</td></tr>" +
+               "<tr><td style=\"padding: 30px;\">" +
+               "<h2 style=\"margin: 0 0 20px 0; color: #111827; font-size: 20px; font-weight: 600;\">" + title + "</h2>" +
+               "<div style=\"color: #374151; font-size: 16px; line-height: 1.6;\">" + content + "</div>" +
+               buttonHtml +
+               "</td></tr>" +
+               "<tr><td style=\"padding: 20px 30px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; border-radius: 0 0 8px 8px; text-align: center;\">" +
+               "<p style=\"margin: 0; color: #6b7280; font-size: 14px;\">" +
+               "This email was sent from " + appName + ". " +
+               "If you have any questions, please contact us at " + (replyToEmail != null && !replyToEmail.isEmpty() ? replyToEmail : fromEmail) + "." +
+               "</p>" +
+               "<p style=\"margin: 10px 0 0 0; color: #9ca3af; font-size: 12px;\">" +
+               "<a href=\"" + appUrl + "\" style=\"color: #10b981; text-decoration: none;\">Visit " + appName + "</a>" +
+               "</p>" +
+               "</td></tr>" +
+               "</table>" +
+               "</td></tr>" +
+               "</table>" +
+               "</body>" +
+               "</html>";
+    }
+    
+    /**
+     * Sends an email using Resend API with both text and HTML content
      * @param to Recipient email address
      * @param subject Email subject
-     * @param text Email body text
+     * @param text Plain text email body
+     * @param html HTML email body (optional, falls back to text if not provided)
      * @return true if email was sent successfully, false otherwise
      */
-    private boolean sendEmail(String to, String subject, String text) {
+    private boolean sendEmail(String to, String subject, String text, String html) {
         if (!isEmailConfigured()) {
             logger.warn("Email not configured. RESEND_API_KEY: {}, RESEND_FROM_EMAIL: {}", 
                     resendApiKey != null && !resendApiKey.isEmpty() ? "SET" : "NOT SET",
@@ -110,6 +185,19 @@ public class EmailService {
             requestBody.put("to", sanitizedEmail);
             requestBody.put("subject", subject);
             requestBody.put("text", text);
+            
+            // Add HTML content if provided, otherwise use text
+            if (html != null && !html.trim().isEmpty()) {
+                requestBody.put("html", html);
+            } else {
+                // Convert plain text to basic HTML
+                requestBody.put("html", convertTextToHtml(text));
+            }
+            
+            // Add reply-to if configured
+            if (replyToEmail != null && !replyToEmail.trim().isEmpty()) {
+                requestBody.put("reply_to", replyToEmail.trim());
+            }
             
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
@@ -151,15 +239,27 @@ public class EmailService {
         String safeGroupName = safeString(groupName, "Unknown Group");
         String safeInviterName = safeString(inviterName, "Someone");
         
-        String subject = "Invitation to join group: " + safeGroupName;
-        String text = "Hello,\n\n" + safeInviterName + " has invited you to join the group \"" + safeGroupName + "\" on BillSplit.\n\n" +
+        String subject = "You're invited to join \"" + safeGroupName + "\" on " + appName;
+        
+        String text = "Hello,\n\n" + safeInviterName + " has invited you to join the group \"" + safeGroupName + "\" on " + appName + ".\n\n" +
                 "To accept this invitation:\n" +
                 "1. Visit: " + appUrl + "\n" +
                 "2. Register or login with this email: " + toEmail + "\n" +
                 "3. Go to your Dashboard to see and accept pending invitations\n\n" +
-                "Best regards,\nBillSplit Team";
+                "Best regards,\n" + appName + " Team";
         
-        sendEmail(toEmail, subject, text);
+        String htmlContent = "<p>Hello,</p>" +
+                "<p><strong>" + safeInviterName + "</strong> has invited you to join the group <strong>\"" + safeGroupName + "\"</strong> on " + appName + ".</p>" +
+                "<p>To accept this invitation:</p>" +
+                "<ol>" +
+                "<li>Visit: <a href=\"" + appUrl + "\">" + appUrl + "</a></li>" +
+                "<li>Register or login with this email: <strong>" + toEmail + "</strong></li>" +
+                "<li>Go to your Dashboard to see and accept pending invitations</li>" +
+                "</ol>";
+        
+        String html = createHtmlEmailTemplate("Group Invitation", htmlContent, "Go to Dashboard", appUrl);
+        
+        sendEmail(toEmail, subject, text, html);
     }
     
     public void sendExpenseNotification(String toEmail, String groupName, String expenseDescription, String amount) {
@@ -167,14 +267,25 @@ public class EmailService {
         String safeDescription = safeString(expenseDescription, "Expense");
         String safeAmount = safeString(amount, "0.00");
         
-        String subject = "New expense added to group: " + safeGroupName;
+        String subject = "New expense in \"" + safeGroupName + "\"";
+        
         String text = "Hello,\n\nA new expense has been added to the group \"" + safeGroupName + "\":\n\n" +
                 "Description: " + safeDescription + "\n" +
                 "Amount: $" + safeAmount + "\n\n" +
                 "View details: " + appUrl + "\n\n" +
-                "Best regards,\nBillSplit Team";
+                "Best regards,\n" + appName + " Team";
         
-        sendEmail(toEmail, subject, text);
+        String htmlContent = "<p>Hello,</p>" +
+                "<p>A new expense has been added to the group <strong>\"" + safeGroupName + "\"</strong>:</p>" +
+                "<div style=\"background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0;\">" +
+                "<p style=\"margin: 5px 0;\"><strong>Description:</strong> " + safeDescription + "</p>" +
+                "<p style=\"margin: 5px 0;\"><strong>Amount:</strong> <span style=\"color: #10b981; font-size: 18px; font-weight: bold;\">$" + safeAmount + "</span></p>" +
+                "</div>";
+        
+        String groupUrl = appUrl + "/groups"; // Link to groups page
+        String html = createHtmlEmailTemplate("New Expense Added", htmlContent, "View Group", groupUrl);
+        
+        sendEmail(toEmail, subject, text, html);
     }
     
     public void sendSettlementNotifications(Long groupId, List<SettlementTransaction> transactions) {
@@ -239,12 +350,27 @@ public class EmailService {
                 String safeUserName = safeString(userName, "there");
                 
                 String subject = "Settlement Summary: " + safeGroupName;
+                
+                // Convert settlement summary to HTML
+                String htmlSummary = settlementSummary.toString()
+                    .replace("\n", "<br>")
+                    .replace("• ", "• ");
+                
                 String text = "Hello " + safeUserName + ",\n\n" +
                         settlementSummary.toString() + "\n" +
                         "View details: " + appUrl + "\n\n" +
-                        "Best regards,\nBillSplit Team";
+                        "Best regards,\n" + appName + " Team";
                 
-                sendEmail(sanitizedEmail, subject, text);
+                String htmlContent = "<p>Hello <strong>" + safeUserName + "</strong>,</p>" +
+                        "<p>Here's the settlement summary for the group <strong>\"" + safeGroupName + "\"</strong>:</p>" +
+                        "<div style=\"background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 20px 0;\">" +
+                        htmlSummary +
+                        "</div>";
+                
+                String groupUrl = appUrl + "/groups"; // Link to groups page
+                String html = createHtmlEmailTemplate("Settlement Summary", htmlContent, "View Details", groupUrl);
+                
+                sendEmail(sanitizedEmail, subject, text, html);
             }
         } catch (Exception e) {
             logger.error("Failed to send settlement notifications for group {}: {}", groupId, e.getMessage(), e);
@@ -256,10 +382,16 @@ public class EmailService {
         String safeRejecterName = safeString(rejecterName, "Someone");
         
         String subject = "Invitation Rejected: " + safeGroupName;
-        String text = "Hello,\n\n" + safeRejecterName + " has rejected your invitation to join the group \"" + safeGroupName + "\" on BillSplit.\n\n" +
-                "View your groups: " + appUrl + "\n\n" +
-                "Best regards,\nBillSplit Team";
         
-        sendEmail(toEmail, subject, text);
+        String text = "Hello,\n\n" + safeRejecterName + " has rejected your invitation to join the group \"" + safeGroupName + "\" on " + appName + ".\n\n" +
+                "View your groups: " + appUrl + "\n\n" +
+                "Best regards,\n" + appName + " Team";
+        
+        String htmlContent = "<p>Hello,</p>" +
+                "<p><strong>" + safeRejecterName + "</strong> has rejected your invitation to join the group <strong>\"" + safeGroupName + "\"</strong> on " + appName + ".</p>";
+        
+        String html = createHtmlEmailTemplate("Invitation Rejected", htmlContent, "View Groups", appUrl);
+        
+        sendEmail(toEmail, subject, text, html);
     }
 }

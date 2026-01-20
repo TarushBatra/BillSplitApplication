@@ -28,6 +28,12 @@ resend:
     key: ${RESEND_API_KEY:}
   from:
     email: ${RESEND_FROM_EMAIL:}
+  reply:
+    to: ${RESEND_REPLY_TO:}
+
+# Application Branding
+app:
+  name: ${APP_NAME:BillSplit}
 
 server:
   port: 8080
