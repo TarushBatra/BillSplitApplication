@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 public class EmailService {
     
     private static final Logger logger = LoggerFactory.getLogger(EmailService.class);
-    private static final String RESEND_API_URL = "https://api.resend.com/emails";
+    private static final String SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send";
     
     @Autowired
     private GroupRepository groupRepository;
@@ -30,13 +30,16 @@ public class EmailService {
     @Autowired
     private GroupMemberRepository groupMemberRepository;
     
-    @Value("${resend.api.key:}")
-    private String resendApiKey;
+    @Value("${sendgrid.api.key:}")
+    private String sendgridApiKey;
     
-    @Value("${resend.from.email:}")
+    @Value("${sendgrid.from.email:}")
     private String fromEmail;
     
-    @Value("${resend.reply.to:}")
+    @Value("${sendgrid.from.name:BillSplit}")
+    private String fromName;
+    
+    @Value("${sendgrid.reply.to:}")
     private String replyToEmail;
     
     @Value("${app.url:http://localhost:3000}")
@@ -53,7 +56,7 @@ public class EmailService {
     );
     
     private boolean isEmailConfigured() {
-        return resendApiKey != null && !resendApiKey.trim().isEmpty() 
+        return sendgridApiKey != null && !sendgridApiKey.trim().isEmpty() 
             && fromEmail != null && !fromEmail.trim().isEmpty();
     }
     
@@ -160,8 +163,8 @@ public class EmailService {
      */
     private boolean sendEmail(String to, String subject, String text, String html) {
         if (!isEmailConfigured()) {
-            logger.warn("Email not configured. RESEND_API_KEY: {}, RESEND_FROM_EMAIL: {}", 
-                    resendApiKey != null && !resendApiKey.isEmpty() ? "SET" : "NOT SET",
+            logger.warn("Email not configured. SENDGRID_API_KEY: {}, SENDGRID_FROM_EMAIL: {}", 
+                    sendgridApiKey != null && !sendgridApiKey.isEmpty() ? "SET" : "NOT SET",
                     fromEmail != null && !fromEmail.isEmpty() ? "SET" : "NOT SET");
             return false;
         }
@@ -177,59 +180,83 @@ public class EmailService {
             // Prepare request headers
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(resendApiKey.trim());
+            headers.setBearerAuth(sendgridApiKey.trim());
             
-            // Prepare request body
+            // Prepare request body for SendGrid API
             Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("from", fromEmail.trim());
-            requestBody.put("to", sanitizedEmail);
+            
+            // From email
+            Map<String, String> fromMap = new HashMap<>();
+            fromMap.put("email", fromEmail.trim());
+            fromMap.put("name", fromName);
+            requestBody.put("from", fromMap);
+            
+            // To email
+            List<Map<String, String>> personalizations = new java.util.ArrayList<>();
+            Map<String, String> toMap = new HashMap<>();
+            toMap.put("email", sanitizedEmail);
+            List<Map<String, String>> toList = new java.util.ArrayList<>();
+            toList.add(toMap);
+            Map<String, Object> personalization = new HashMap<>();
+            personalization.put("to", toList);
+            personalizations.add(personalization);
+            requestBody.put("personalizations", personalizations);
+            
+            // Subject
             requestBody.put("subject", subject);
-            requestBody.put("text", text);
             
-            // Add HTML content if provided, otherwise use text
-            if (html != null && !html.trim().isEmpty()) {
-                requestBody.put("html", html);
-            } else {
-                // Convert plain text to basic HTML
-                requestBody.put("html", convertTextToHtml(text));
-            }
+            // Content (both text and HTML)
+            List<Map<String, String>> content = new java.util.ArrayList<>();
             
-            // Add reply-to if configured
+            // Text content
+            Map<String, String> textContent = new HashMap<>();
+            textContent.put("type", "text/plain");
+            textContent.put("value", text);
+            content.add(textContent);
+            
+            // HTML content
+            Map<String, String> htmlContent = new HashMap<>();
+            htmlContent.put("type", "text/html");
+            htmlContent.put("value", html != null && !html.trim().isEmpty() ? html : convertTextToHtml(text));
+            content.add(htmlContent);
+            
+            requestBody.put("content", content);
+            
+            // Reply-to if configured
             if (replyToEmail != null && !replyToEmail.trim().isEmpty()) {
                 requestBody.put("reply_to", replyToEmail.trim());
             }
             
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
-            logger.info("Sending email via Resend API to {} (from: {})", sanitizedEmail, fromEmail);
+            logger.info("Sending email via SendGrid API to {} (from: {})", sanitizedEmail, fromEmail);
             
             // Make API call
-            @SuppressWarnings("unchecked")
-            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                RESEND_API_URL,
+            ResponseEntity<String> response = restTemplate.exchange(
+                SENDGRID_API_URL,
                 HttpMethod.POST,
                 request,
-                (Class<Map<String, Object>>) (Class<?>) Map.class
+                String.class
             );
             
             if (response.getStatusCode().is2xxSuccessful()) {
-                logger.info("Email sent successfully to {} via Resend API", sanitizedEmail);
+                logger.info("Email sent successfully to {} via SendGrid API", sanitizedEmail);
                 return true;
             } else {
-                logger.error("Failed to send email to {}. Resend API returned status: {}", 
+                logger.error("Failed to send email to {}. SendGrid API returned status: {}", 
                         sanitizedEmail, response.getStatusCode());
                 return false;
             }
         } catch (org.springframework.web.client.HttpClientErrorException e) {
-            logger.error("Resend API error (4xx) sending email to {}: Status: {}, Response: {}", 
+            logger.error("SendGrid API error (4xx) sending email to {}: Status: {}, Response: {}", 
                     sanitizedEmail, e.getStatusCode(), e.getResponseBodyAsString(), e);
             return false;
         } catch (org.springframework.web.client.HttpServerErrorException e) {
-            logger.error("Resend API error (5xx) sending email to {}: Status: {}, Response: {}", 
+            logger.error("SendGrid API error (5xx) sending email to {}: Status: {}, Response: {}", 
                     sanitizedEmail, e.getStatusCode(), e.getResponseBodyAsString(), e);
             return false;
         } catch (Exception e) {
-            logger.error("Failed to send email to {} via Resend API: {} - {}", 
+            logger.error("Failed to send email to {} via SendGrid API: {} - {}", 
                     sanitizedEmail, e.getClass().getSimpleName(), e.getMessage(), e);
             return false;
         }
@@ -263,9 +290,9 @@ public class EmailService {
         
         boolean sent = sendEmail(toEmail, subject, text, html);
         if (sent) {
-            logger.info("Group invitation email sent successfully to: {}", toEmail);
+            logger.info("Group invitation email sent successfully to: {} via SendGrid", toEmail);
         } else {
-            logger.error("Failed to send group invitation email to: {}. Check email configuration and logs above.", toEmail);
+            logger.error("Failed to send group invitation email to: {}. Check SendGrid configuration and logs above.", toEmail);
         }
     }
     

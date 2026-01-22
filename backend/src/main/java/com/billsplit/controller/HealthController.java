@@ -19,11 +19,11 @@ public class HealthController {
     @Autowired(required = false)
     private EmailService emailService;
     
-    @Value("${resend.api.key:}")
-    private String resendApiKey;
+    @Value("${sendgrid.api.key:}")
+    private String sendgridApiKey;
     
-    @Value("${resend.from.email:}")
-    private String resendFromEmail;
+    @Value("${sendgrid.from.email:}")
+    private String sendgridFromEmail;
     
     @GetMapping
     public ResponseEntity<Map<String, String>> health() {
@@ -31,13 +31,13 @@ public class HealthController {
         response.put("status", "UP");
         response.put("service", "BillSplit Backend");
         
-        // Email configuration status (Resend)
-        boolean emailConfigured = resendApiKey != null && !resendApiKey.trim().isEmpty() 
-            && resendFromEmail != null && !resendFromEmail.trim().isEmpty();
+        // Email configuration status (SendGrid)
+        boolean emailConfigured = sendgridApiKey != null && !sendgridApiKey.trim().isEmpty() 
+            && sendgridFromEmail != null && !sendgridFromEmail.trim().isEmpty();
         response.put("email_configured", String.valueOf(emailConfigured));
-        response.put("resend_api_key_set", resendApiKey != null && !resendApiKey.trim().isEmpty() ? "YES" : "NO");
-        response.put("resend_from_email_set", resendFromEmail != null && !resendFromEmail.trim().isEmpty() ? "YES" : "NO");
-        response.put("email_provider", "Resend API");
+        response.put("sendgrid_api_key_set", sendgridApiKey != null && !sendgridApiKey.trim().isEmpty() ? "YES" : "NO");
+        response.put("sendgrid_from_email_set", sendgridFromEmail != null && !sendgridFromEmail.trim().isEmpty() ? "YES" : "NO");
+        response.put("email_provider", "SendGrid API (Free: 100 emails/day)");
         
         return ResponseEntity.ok(response);
     }

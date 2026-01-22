@@ -22,14 +22,15 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
   
-# Email Configuration - Using Resend API (HTTP-based, works on Render)
-resend:
+# Email Configuration - Using SendGrid API (HTTP-based, works on Render, FREE tier: 100 emails/day)
+sendgrid:
   api:
-    key: ${RESEND_API_KEY:}
+    key: ${SENDGRID_API_KEY:}
   from:
-    email: ${RESEND_FROM_EMAIL:}
+    email: ${SENDGRID_FROM_EMAIL:}
+    name: ${SENDGRID_FROM_NAME:BillSplit}
   reply:
-    to: ${RESEND_REPLY_TO:}
+    to: ${SENDGRID_REPLY_TO:}
 
 server:
   port: 8080
