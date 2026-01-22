@@ -236,6 +236,8 @@ public class EmailService {
     }
     
     public void sendGroupInvitation(String toEmail, String groupName, String inviterName) {
+        logger.info("Attempting to send group invitation email to: {}", toEmail);
+        
         String safeGroupName = safeString(groupName, "Unknown Group");
         String safeInviterName = safeString(inviterName, "Someone");
         
@@ -259,7 +261,12 @@ public class EmailService {
         
         String html = createHtmlEmailTemplate("Group Invitation", htmlContent, "Go to Dashboard", appUrl);
         
-        sendEmail(toEmail, subject, text, html);
+        boolean sent = sendEmail(toEmail, subject, text, html);
+        if (sent) {
+            logger.info("Group invitation email sent successfully to: {}", toEmail);
+        } else {
+            logger.error("Failed to send group invitation email to: {}. Check email configuration and logs above.", toEmail);
+        }
     }
     
     public void sendExpenseNotification(String toEmail, String groupName, String expenseDescription, String amount) {
