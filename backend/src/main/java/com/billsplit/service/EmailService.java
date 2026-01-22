@@ -192,7 +192,7 @@ public class EmailService {
             requestBody.put("from", fromMap);
             
             // To email
-            List<Map<String, String>> personalizations = new java.util.ArrayList<>();
+            List<Map<String, Object>> personalizations = new java.util.ArrayList<>();
             Map<String, String> toMap = new HashMap<>();
             toMap.put("email", sanitizedEmail);
             List<Map<String, String>> toList = new java.util.ArrayList<>();
