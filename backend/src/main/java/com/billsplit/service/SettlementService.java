@@ -12,9 +12,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.util.*;
 
 @Service
@@ -40,12 +37,6 @@ public class SettlementService {
     private UserRepository userRepository;
     
     public List<SettlementTransaction> calculateSettlements(Long groupId) {
-        // #region agent log
-        try {
-            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"SettlementService.java:39\",\"message\":\"calculateSettlements called\",\"data\":{\"groupId\":%d},\"timestamp\":%d}%n", groupId, System.currentTimeMillis());
-            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception e) {}
-        // #endregion
         User currentUser = authService.getCurrentUser();
         Group group = groupMemberRepository.findByUser(currentUser).stream()
                 .map(GroupMember::getGroup)
@@ -56,24 +47,7 @@ public class SettlementService {
         List<GroupMember> members = groupMemberRepository.findByGroup(group);
         Map<Long, BigDecimal> balances = calculateBalances(group, members);
         
-        // #region agent log
-        try {
-            String balancesStr = balances.entrySet().stream().map(e -> e.getKey() + ":" + e.getValue()).reduce((a, b) -> a + "," + b).orElse("empty");
-            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"SettlementService.java:48\",\"message\":\"Balances calculated\",\"data\":{\"groupId\":%d,\"balances\":\"%s\"},\"timestamp\":%d}%n", groupId, balancesStr, System.currentTimeMillis());
-            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception e) {}
-        // #endregion
-        
-        List<SettlementTransaction> result = optimizeSettlements(balances, members);
-        
-        // #region agent log
-        try {
-            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"SettlementService.java:50\",\"message\":\"Settlements optimized\",\"data\":{\"groupId\":%d,\"transactionCount\":%d},\"timestamp\":%d}%n", groupId, result.size(), System.currentTimeMillis());
-            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception e) {}
-        // #endregion
-        
-        return result;
+        return optimizeSettlements(balances, members);
     }
     
     private Map<Long, BigDecimal> calculateBalances(Group group, List<GroupMember> members) {
@@ -104,17 +78,6 @@ public class SettlementService {
                 balances.put(toUserId, balances.get(toUserId).subtract(amount));
             }
         }
-        
-        // #region agent log
-        try {
-            for (GroupMember member : members) {
-                User user = member.getUser();
-                BigDecimal balance = balances.get(user.getId());
-                String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\",\"location\":\"SettlementService.java:95\",\"message\":\"User balance calculated with settlements\",\"data\":{\"userId\":%d,\"balance\":%s},\"timestamp\":%d}%n", user.getId(), balance, System.currentTimeMillis());
-                Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            }
-        } catch (Exception e) {}
-        // #endregion
         
         return balances;
     }
@@ -158,13 +121,6 @@ public class SettlementService {
             
             BigDecimal transactionAmount = creditorAmount.min(debtorAmount);
             
-            // #region agent log
-            try {
-                String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"SettlementService.java:96\",\"message\":\"Processing settlement transaction\",\"data\":{\"debtorId\":%d,\"debtorOriginalValue\":%s,\"debtorAmount\":%s,\"creditorId\":%d,\"creditorAmount\":%s,\"transactionAmount\":%s},\"timestamp\":%d}%n", debtor.getKey(), debtorOriginalValue, debtorAmount, creditor.getKey(), creditorAmount, transactionAmount, System.currentTimeMillis());
-                Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (Exception e) {}
-            // #endregion
-            
             if (transactionAmount.compareTo(BigDecimal.ZERO) > 0) {
                 SettlementTransaction transaction = new SettlementTransaction(
                         debtor.getKey(),
@@ -179,13 +135,6 @@ public class SettlementService {
                 creditor.setValue(creditorAmount.subtract(transactionAmount));
                 BigDecimal debtorNewValue = debtorOriginalValue.add(transactionAmount);
                 debtor.setValue(debtorNewValue);
-                
-                // #region agent log
-                try {
-                    String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"SettlementService.java:117\",\"message\":\"Balance updated after transaction\",\"data\":{\"debtorId\":%d,\"debtorBefore\":%s,\"debtorAfter\":%s,\"creditorId\":%d,\"creditorBefore\":%s,\"creditorAfter\":%s},\"timestamp\":%d}%n", debtor.getKey(), debtorOriginalValue, debtorNewValue, creditor.getKey(), creditorAmount, creditor.getValue(), System.currentTimeMillis());
-                    Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-                } catch (Exception e) {}
-                // #endregion
                 
                 // Move to next if balance is effectively zero (using epsilon for floating point precision)
                 BigDecimal EPSILON = new BigDecimal("0.01");

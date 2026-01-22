@@ -15,9 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -49,12 +46,6 @@ public class ExpenseService {
     private EmailService emailService;
     
     public Expense createExpense(ExpenseRequest expenseRequest) {
-        // #region agent log
-        try {
-            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"ExpenseService.java:48\",\"message\":\"createExpense called\",\"data\":{\"groupId\":%d,\"amount\":%s,\"splitType\":\"%s\"},\"timestamp\":%d}%n", expenseRequest.getGroupId(), expenseRequest.getAmount(), expenseRequest.getSplitType(), System.currentTimeMillis());
-            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception e) {}
-        // #endregion
         User currentUser = authService.getCurrentUser();
         Group group = groupMemberRepository.findByUser(currentUser).stream()
                 .map(GroupMember::getGroup)
@@ -97,39 +88,12 @@ public class ExpenseService {
         
         Expense savedExpense = expenseRepository.save(expense);
         
-        // #region agent log
-        try {
-            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"ExpenseService.java:95\",\"message\":\"Expense saved\",\"data\":{\"expenseId\":%d,\"groupId\":%d,\"amount\":%s},\"timestamp\":%d}%n", savedExpense.getId(), group.getId(), savedExpense.getAmount(), System.currentTimeMillis());
-            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception e) {}
-        // #endregion
-        
         // Create expense shares
         if (expenseRequest.getSplitType() == Expense.SplitType.EQUAL) {
             createEqualShares(savedExpense, group, expenseRequest.getPaidByPendingMemberEmail() != null);
-            
-            // #region agent log
-            try {
-                // Verify total shares equal expense amount
-                List<ExpenseShare> allShares = expenseShareRepository.findByExpense(savedExpense);
-                BigDecimal totalShares = allShares.stream()
-                    .map(ExpenseShare::getAmountOwed)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-                String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"L\",\"location\":\"ExpenseService.java:109\",\"message\":\"Equal shares created - verification\",\"data\":{\"expenseId\":%d,\"expenseAmount\":%s,\"membersSharesTotal\":%s,\"description\":\"%s\"},\"timestamp\":%d}%n", 
-                    savedExpense.getId(), savedExpense.getAmount(), totalShares, savedExpense.getDescription(), System.currentTimeMillis());
-                Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (Exception e) {}
-            // #endregion
         } else {
             createCustomShares(savedExpense, expenseRequest.getShares(), expenseRequest.getPendingShares());
         }
-        
-        // #region agent log
-        try {
-            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"ExpenseService.java:122\",\"message\":\"Expense shares created\",\"data\":{\"expenseId\":%d},\"timestamp\":%d}%n", savedExpense.getId(), System.currentTimeMillis());
-            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception e) {}
-        // #endregion
         
         // Send expense notification emails to all group members (except the payer)
         try {
@@ -250,13 +214,6 @@ public class ExpenseService {
         BigDecimal totalShares = membersTotal.add(pendingTotal);
         BigDecimal difference = expense.getAmount().subtract(totalShares).abs();
         if (difference.compareTo(new BigDecimal("0.01")) > 0) {
-            // #region agent log
-            try {
-                String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"O\",\"location\":\"ExpenseService.java:244\",\"message\":\"VALIDATION ERROR: Shares don't sum to expense amount\",\"data\":{\"expenseId\":%d,\"expenseAmount\":%s,\"membersTotal\":%s,\"pendingTotal\":%s,\"totalShares\":%s,\"difference\":%s},\"timestamp\":%d}%n", 
-                    expense.getId(), expense.getAmount(), membersTotal, pendingTotal, totalShares, difference, System.currentTimeMillis());
-                Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            } catch (Exception e) {}
-            // #endregion
             logger.error("VALIDATION ERROR: Expense {} shares don't sum correctly. Expected: {}, Got: {}, Difference: {}", 
                 expense.getId(), expense.getAmount(), totalShares, difference);
         }

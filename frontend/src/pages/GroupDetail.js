@@ -197,11 +197,7 @@ const GroupDetail = () => {
             const userId = share.user?.id;
             const amountOwed = parseFloat(share.amountOwed || 0);
             if (userId && balanceMap[userId] && amountOwed > 0) {
-              const beforeOwed = balanceMap[userId].owed;
               balanceMap[userId].owed += amountOwed;
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:197',message:'Share applied to member',data:{expenseId:expense.id,userId,amountOwed,beforeOwed,afterOwed:balanceMap[userId].owed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'N'})}).catch(()=>{});
-              // #endregion
             }
           });
           
@@ -218,11 +214,7 @@ const GroupDetail = () => {
               if (email && amount > 0) {
                 const pendingKey = `pending-${email}`;
                 if (balanceMap[pendingKey]) {
-                  const beforeOwed = balanceMap[pendingKey].owed;
                   balanceMap[pendingKey].owed += amount;
-                  // #region agent log
-                  fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:214',message:'Pending share applied (EQUAL)',data:{expenseId:expense.id,email,amount,beforeOwed,afterOwed:balanceMap[pendingKey].owed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'N'})}).catch(()=>{});
-                  // #endregion
                 }
               }
             });
@@ -261,21 +253,10 @@ const GroupDetail = () => {
       let totalPaid = 0;
       let totalOwed = 0;
       Object.keys(balanceMap).forEach(key => {
-        const beforeBalance = balanceMap[key].balance;
         balanceMap[key].balance = balanceMap[key].paid - balanceMap[key].owed;
         totalPaid += balanceMap[key].paid;
         totalOwed += balanceMap[key].owed;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:263',message:'Balance calculated',data:{key,name:balanceMap[key].name,paid:balanceMap[key].paid,owed:balanceMap[key].owed,balance:balanceMap[key].balance,isPending:balanceMap[key].isPending},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-        // #endregion
       });
-      
-      // Validation: Total paid should equal sum of all expense amounts (excluding deleted)
-      const totalExpenseAmount = expensesData.filter(e => !e.deletedAt).reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
-      const balance = totalPaid - totalOwed;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:272',message:'Balance validation',data:{totalPaid,totalOwed,totalExpenseAmount,netBalance:balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'P'})}).catch(()=>{});
-      // #endregion
       
       // Adjust balances based on settlements
       // Use passed settlementHistoryData if provided, otherwise fall back to state
@@ -287,15 +268,9 @@ const GroupDetail = () => {
         
         if (fromUserId && balanceMap[fromUserId]) {
           balanceMap[fromUserId].balance += amount;
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:283',message:'Settlement applied to debtor',data:{fromUserId,amount,newBalance:balanceMap[fromUserId].balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-          // #endregion
         }
         if (toUserId && balanceMap[toUserId]) {
           balanceMap[toUserId].balance -= amount;
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:286',message:'Settlement applied to creditor',data:{toUserId,amount,newBalance:balanceMap[toUserId].balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-          // #endregion
         }
       });
 
@@ -304,15 +279,8 @@ const GroupDetail = () => {
       // Calculate settlements
       const allSettlements = calculateSettlementsFromBalances(balanceMap);
       setSettlements(allSettlements);
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:290',message:'Balance calculation complete',data:{expenseCount:expensesData.filter(e=>!e.deletedAt).length,memberCount:Object.keys(balanceMap).filter(k=>!k.startsWith('pending-')).length,pendingCount:Object.keys(balanceMap).filter(k=>k.startsWith('pending-')).length,settlementCount:allSettlements.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Q'})}).catch(()=>{});
-      // #endregion
     } catch (error) {
       console.error('Error calculating balances:', error);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:295',message:'Balance calculation ERROR',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Q'})}).catch(()=>{});
-      // #endregion
       // Ensure balances are set even if there's an error
       setBalances({});
       setSettlements([]);
