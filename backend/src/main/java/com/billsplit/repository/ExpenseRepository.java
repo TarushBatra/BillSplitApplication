@@ -17,7 +17,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     
     List<Expense> findByPaidBy(User user);
     
-    @Query("SELECT e FROM Expense e WHERE e.group = :group ORDER BY e.createdAt DESC")
+    @Query("SELECT e FROM Expense e WHERE e.group = :group AND e.deletedAt IS NULL ORDER BY e.createdAt DESC")
     List<Expense> findByGroupOrderByCreatedAtDesc(@Param("group") Group group);
 }
 

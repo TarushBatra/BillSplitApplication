@@ -189,49 +189,40 @@ const GroupDetail = () => {
         const splitType = (expense.splitType || '').toUpperCase();
         
         if (splitType === 'EQUAL') {
-          // For EQUAL splits, use ExpenseShare records to determine who was part of the expense
-          // This ensures new members added later are NOT included in previous expenses
+          // For EQUAL splits, use the actual share amounts from ExpenseShare records
+          // This ensures we use the exact amounts calculated by the backend (including rounding adjustments)
           
-          // Calculate amountPerPerson based on the number of shares (original participants)
-          const totalOriginalParticipants = shares.length;
-          
-          // Check for pending members in the description
-          const pendingSharesMatch = description.match(/\(Pending shares:\s*([^)]+)\)/i);
-          let pendingCount = 0;
-          if (pendingSharesMatch) {
-            const pendingSharesStr = pendingSharesMatch[1];
-            const pendingSharePairs = pendingSharesStr.split(',').map(s => s.trim());
-            pendingCount = pendingSharePairs.length;
-          }
-          
-          const totalPeopleAtExpenseTime = totalOriginalParticipants + pendingCount;
-          
-          // Safety check: ensure totalPeopleAtExpenseTime is at least 1
-          if (totalPeopleAtExpenseTime === 0) {
-            continue;
-          }
-          
-          const amountPerPerson = expenseAmount / totalPeopleAtExpenseTime;
-          
-          // Apply amountPerPerson ONLY to members who have a share record (were part of the expense)
+          // Apply actual share amounts from ExpenseShare records
           shares.forEach(share => {
             const userId = share.user?.id;
-            if (userId && balanceMap[userId]) {
-              balanceMap[userId].owed += amountPerPerson;
+            const amountOwed = parseFloat(share.amountOwed || 0);
+            if (userId && balanceMap[userId] && amountOwed > 0) {
+              const beforeOwed = balanceMap[userId].owed;
+              balanceMap[userId].owed += amountOwed;
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:197',message:'Share applied to member',data:{expenseId:expense.id,userId,amountOwed,beforeOwed,afterOwed:balanceMap[userId].owed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'N'})}).catch(()=>{});
+              // #endregion
             }
           });
           
           // Handle pending members from description (if any)
+          // Use the actual amounts stored in the description (from backend calculation)
+          const pendingSharesMatch = description.match(/\(Pending shares:\s*([^)]+)\)/i);
           if (pendingSharesMatch) {
             const pendingSharesStr = pendingSharesMatch[1];
             const pendingSharePairs = pendingSharesStr.split(',').map(s => s.trim());
+            
             pendingSharePairs.forEach(pair => {
               const [email, amountStr] = pair.split(':').map(s => s.trim());
               const amount = parseFloat(amountStr || 0);
               if (email && amount > 0) {
                 const pendingKey = `pending-${email}`;
                 if (balanceMap[pendingKey]) {
-                  balanceMap[pendingKey].owed += amountPerPerson; // Use amountPerPerson for EQUAL splits
+                  const beforeOwed = balanceMap[pendingKey].owed;
+                  balanceMap[pendingKey].owed += amount;
+                  // #region agent log
+                  fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:214',message:'Pending share applied (EQUAL)',data:{expenseId:expense.id,email,amount,beforeOwed,afterOwed:balanceMap[pendingKey].owed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'N'})}).catch(()=>{});
+                  // #endregion
                 }
               }
             });
@@ -267,9 +258,24 @@ const GroupDetail = () => {
       }
 
       // Calculate final balances
+      let totalPaid = 0;
+      let totalOwed = 0;
       Object.keys(balanceMap).forEach(key => {
+        const beforeBalance = balanceMap[key].balance;
         balanceMap[key].balance = balanceMap[key].paid - balanceMap[key].owed;
+        totalPaid += balanceMap[key].paid;
+        totalOwed += balanceMap[key].owed;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:263',message:'Balance calculated',data:{key,name:balanceMap[key].name,paid:balanceMap[key].paid,owed:balanceMap[key].owed,balance:balanceMap[key].balance,isPending:balanceMap[key].isPending},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+        // #endregion
       });
+      
+      // Validation: Total paid should equal sum of all expense amounts (excluding deleted)
+      const totalExpenseAmount = expensesData.filter(e => !e.deletedAt).reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
+      const balance = totalPaid - totalOwed;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:272',message:'Balance validation',data:{totalPaid,totalOwed,totalExpenseAmount,netBalance:balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'P'})}).catch(()=>{});
+      // #endregion
       
       // Adjust balances based on settlements
       // Use passed settlementHistoryData if provided, otherwise fall back to state
@@ -281,9 +287,15 @@ const GroupDetail = () => {
         
         if (fromUserId && balanceMap[fromUserId]) {
           balanceMap[fromUserId].balance += amount;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:283',message:'Settlement applied to debtor',data:{fromUserId,amount,newBalance:balanceMap[fromUserId].balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
         }
         if (toUserId && balanceMap[toUserId]) {
           balanceMap[toUserId].balance -= amount;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:286',message:'Settlement applied to creditor',data:{toUserId,amount,newBalance:balanceMap[toUserId].balance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
         }
       });
 
@@ -292,8 +304,15 @@ const GroupDetail = () => {
       // Calculate settlements
       const allSettlements = calculateSettlementsFromBalances(balanceMap);
       setSettlements(allSettlements);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:290',message:'Balance calculation complete',data:{expenseCount:expensesData.filter(e=>!e.deletedAt).length,memberCount:Object.keys(balanceMap).filter(k=>!k.startsWith('pending-')).length,pendingCount:Object.keys(balanceMap).filter(k=>k.startsWith('pending-')).length,settlementCount:allSettlements.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Q'})}).catch(()=>{});
+      // #endregion
     } catch (error) {
       console.error('Error calculating balances:', error);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/9a5b9856-af02-44c8-b291-90bdfd33f3ee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'GroupDetail.js:295',message:'Balance calculation ERROR',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Q'})}).catch(()=>{});
+      // #endregion
       // Ensure balances are set even if there's an error
       setBalances({});
       setSettlements([]);
@@ -302,59 +321,86 @@ const GroupDetail = () => {
   
   const calculateSettlementsFromBalances = (balanceMap) => {
     const settlements = [];
-    const workingBalances = {};
+    // Create working balances as mutable entries
+    const workingBalances = [];
     Object.entries(balanceMap).forEach(([key, balanceInfo]) => {
-      workingBalances[key] = {
+      workingBalances.push({
+        key,
         ...balanceInfo,
         balance: balanceInfo.balance
-      };
+      });
     });
     
-    const creditors = [];
-    const debtors = [];
+    // Separate creditors (positive balance) and debtors (negative balance)
+    const creditors = workingBalances.filter(b => b.balance > 0.01);
+    const debtors = workingBalances.filter(b => b.balance < -0.01);
     
-    Object.entries(workingBalances).forEach(([key, balanceInfo]) => {
-      const balance = balanceInfo.balance;
-      if (balance > 0.01) {
-        creditors.push({ key, ...balanceInfo });
-      } else if (balance < -0.01) {
-        debtors.push({ key, ...balanceInfo });
-      }
-    });
-    
+    // Sort by absolute balance (largest first for creditors, most negative first for debtors)
     creditors.sort((a, b) => b.balance - a.balance);
     debtors.sort((a, b) => a.balance - b.balance);
     
-    const totalToReceive = creditors.reduce((sum, c) => sum + c.balance, 0);
+    // Greedy algorithm: match debtors with creditors
+    let creditorIndex = 0;
+    let debtorIndex = 0;
     
-    for (const debtor of debtors) {
-      const debtorBalance = Math.abs(debtor.balance);
-      if (debtorBalance < 0.01) continue;
+    while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+      const creditor = creditors[creditorIndex];
+      const debtor = debtors[debtorIndex];
       
-      for (const creditor of creditors) {
-        if (creditor.balance < 0.01) continue;
+      // Skip if balance is effectively zero
+      if (Math.abs(creditor.balance) < 0.01) {
+        creditorIndex++;
+        continue;
+      }
+      if (Math.abs(debtor.balance) < 0.01) {
+        debtorIndex++;
+        continue;
+      }
+      
+      const creditorAmount = creditor.balance;
+      const debtorAmount = Math.abs(debtor.balance);
+      
+      // Transaction amount is the minimum of what creditor is owed and what debtor owes
+      const transactionAmount = Math.min(creditorAmount, debtorAmount);
+      
+      if (transactionAmount > 0.01) {
+        const isPendingFrom = debtor.isPending || debtor.key.startsWith('pending-');
+        const isPendingTo = creditor.isPending || creditor.key.startsWith('pending-');
         
-        const proportionalAmount = (creditor.balance / totalToReceive) * debtorBalance;
+        const fromUserId = isPendingFrom ? null : (debtor.key.startsWith('pending-') ? null : parseInt(debtor.key));
+        const toUserId = isPendingTo ? null : (creditor.key.startsWith('pending-') ? null : parseInt(creditor.key));
         
-        if (proportionalAmount > 0.01) {
-          const isPendingFrom = debtor.isPending || debtor.key.startsWith('pending-');
-          const isPendingTo = creditor.isPending || creditor.key.startsWith('pending-');
-          
-          const fromUserId = isPendingFrom ? null : (debtor.key.startsWith('pending-') ? null : parseInt(debtor.key));
-          const toUserId = isPendingTo ? null : (creditor.key.startsWith('pending-') ? null : parseInt(creditor.key));
-          
-          settlements.push({
-            fromUserId: fromUserId,
-            fromUserName: debtor.name,
-            fromUserEmail: debtor.email,
-            fromUserIsPending: isPendingFrom,
-            toUserId: toUserId,
-            toUserName: creditor.name,
-            toUserEmail: creditor.email,
-            toUserIsPending: isPendingTo,
-            amount: proportionalAmount
-          });
+        settlements.push({
+          fromUserId: fromUserId,
+          fromUserName: debtor.name,
+          fromUserEmail: debtor.email,
+          fromUserIsPending: isPendingFrom,
+          toUserId: toUserId,
+          toUserName: creditor.name,
+          toUserEmail: creditor.email,
+          toUserIsPending: isPendingTo,
+          amount: parseFloat(transactionAmount.toFixed(2))
+        });
+        
+        // Update balances
+        creditor.balance -= transactionAmount;
+        debtor.balance += transactionAmount; // Add because balance is negative
+        
+        // Round to avoid floating point precision issues
+        creditor.balance = parseFloat(creditor.balance.toFixed(2));
+        debtor.balance = parseFloat(debtor.balance.toFixed(2));
+        
+        // Move to next if balance is effectively zero
+        if (Math.abs(creditor.balance) < 0.01) {
+          creditorIndex++;
         }
+        if (Math.abs(debtor.balance) < 0.01) {
+          debtorIndex++;
+        }
+      } else {
+        // If transaction amount is too small, move to next
+        creditorIndex++;
+        debtorIndex++;
       }
     }
     

@@ -28,10 +28,10 @@ public interface ExpenseShareRepository extends JpaRepository<ExpenseShare, Long
     @Query("SELECT es FROM ExpenseShare es JOIN es.expense e WHERE e.group = :group AND es.user = :user")
     List<ExpenseShare> findByGroupAndUser(@Param("group") Group group, @Param("user") User user);
     
-    @Query("SELECT COALESCE(SUM(es.amountOwed), 0) FROM ExpenseShare es JOIN es.expense e WHERE e.group = :group AND es.user = :user")
+    @Query("SELECT COALESCE(SUM(es.amountOwed), 0) FROM ExpenseShare es JOIN es.expense e WHERE e.group = :group AND es.user = :user AND e.deletedAt IS NULL")
     BigDecimal getTotalOwedByUserInGroup(@Param("group") Group group, @Param("user") User user);
     
-    @Query("SELECT COALESCE(SUM(e.amount), 0) FROM Expense e WHERE e.group = :group AND e.paidBy = :user")
+    @Query("SELECT COALESCE(SUM(e.amount), 0) FROM Expense e WHERE e.group = :group AND e.paidBy = :user AND e.deletedAt IS NULL")
     BigDecimal getTotalPaidByUserInGroup(@Param("group") Group group, @Param("user") User user);
 }
 

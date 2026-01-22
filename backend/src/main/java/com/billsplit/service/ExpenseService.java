@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -46,6 +49,12 @@ public class ExpenseService {
     private EmailService emailService;
     
     public Expense createExpense(ExpenseRequest expenseRequest) {
+        // #region agent log
+        try {
+            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"ExpenseService.java:48\",\"message\":\"createExpense called\",\"data\":{\"groupId\":%d,\"amount\":%s,\"splitType\":\"%s\"},\"timestamp\":%d}%n", expenseRequest.getGroupId(), expenseRequest.getAmount(), expenseRequest.getSplitType(), System.currentTimeMillis());
+            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception e) {}
+        // #endregion
         User currentUser = authService.getCurrentUser();
         Group group = groupMemberRepository.findByUser(currentUser).stream()
                 .map(GroupMember::getGroup)
@@ -88,12 +97,39 @@ public class ExpenseService {
         
         Expense savedExpense = expenseRepository.save(expense);
         
+        // #region agent log
+        try {
+            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"ExpenseService.java:95\",\"message\":\"Expense saved\",\"data\":{\"expenseId\":%d,\"groupId\":%d,\"amount\":%s},\"timestamp\":%d}%n", savedExpense.getId(), group.getId(), savedExpense.getAmount(), System.currentTimeMillis());
+            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception e) {}
+        // #endregion
+        
         // Create expense shares
         if (expenseRequest.getSplitType() == Expense.SplitType.EQUAL) {
             createEqualShares(savedExpense, group, expenseRequest.getPaidByPendingMemberEmail() != null);
+            
+            // #region agent log
+            try {
+                // Verify total shares equal expense amount
+                List<ExpenseShare> allShares = expenseShareRepository.findByExpense(savedExpense);
+                BigDecimal totalShares = allShares.stream()
+                    .map(ExpenseShare::getAmountOwed)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+                String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"L\",\"location\":\"ExpenseService.java:109\",\"message\":\"Equal shares created - verification\",\"data\":{\"expenseId\":%d,\"expenseAmount\":%s,\"membersSharesTotal\":%s,\"description\":\"%s\"},\"timestamp\":%d}%n", 
+                    savedExpense.getId(), savedExpense.getAmount(), totalShares, savedExpense.getDescription(), System.currentTimeMillis());
+                Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (Exception e) {}
+            // #endregion
         } else {
             createCustomShares(savedExpense, expenseRequest.getShares(), expenseRequest.getPendingShares());
         }
+        
+        // #region agent log
+        try {
+            String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"ExpenseService.java:122\",\"message\":\"Expense shares created\",\"data\":{\"expenseId\":%d},\"timestamp\":%d}%n", savedExpense.getId(), System.currentTimeMillis());
+            Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception e) {}
+        // #endregion
         
         // Send expense notification emails to all group members (except the payer)
         try {
@@ -121,18 +157,109 @@ public class ExpenseService {
         List<PendingGroupMember> pendingMembers = pendingGroupMemberRepository.findByGroup(group);
         
         int totalParticipants = members.size() + pendingMembers.size();
-        BigDecimal amountPerPerson = expense.getAmount().divide(
-                BigDecimal.valueOf(totalParticipants), 2, RoundingMode.HALF_UP);
-        
-        // Create shares for all actual members (INCLUDING the payer).
-        // "Owed" represents each participant's share of the expense regardless of who paid.
-        for (GroupMember member : members) {
-            ExpenseShare share = new ExpenseShare(expense, member.getUser(), amountPerPerson);
-            expenseShareRepository.save(share);
+        if (totalParticipants == 0) {
+            throw new RuntimeException("Cannot split expense with no participants");
         }
         
-        // Pending members' shares are tracked in the description for frontend calculation
-        // They don't have ExpenseShare records since they're not actual users yet
+        // Calculate base amount per person (with more precision)
+        BigDecimal amountPerPerson = expense.getAmount().divide(
+                BigDecimal.valueOf(totalParticipants), 4, RoundingMode.HALF_UP);
+        
+        // Round to 2 decimal places for storage
+        BigDecimal roundedAmountPerPerson = amountPerPerson.setScale(2, RoundingMode.HALF_UP);
+        
+        // Calculate total if all participants pay the rounded amount
+        BigDecimal totalRoundedAll = roundedAmountPerPerson.multiply(BigDecimal.valueOf(totalParticipants));
+        
+        // Calculate rounding error (difference between expense amount and rounded total)
+        BigDecimal roundingError = expense.getAmount().subtract(totalRoundedAll);
+        
+        // Distribute rounding error: give it to the last participant (member if members exist, otherwise last pending)
+        // First, calculate what members should pay (rounded amount, with rounding error if they're the last group)
+        BigDecimal totalForMembers = roundedAmountPerPerson.multiply(BigDecimal.valueOf(members.size()));
+        BigDecimal totalForPending = roundedAmountPerPerson.multiply(BigDecimal.valueOf(pendingMembers.size()));
+        
+        // Distribute rounding error to the last group (members if they exist, otherwise pending)
+        if (members.size() > 0) {
+            // Members get the rounding error (distributed to last member)
+            totalForMembers = totalForMembers.add(roundingError);
+        } else if (pendingMembers.size() > 0) {
+            // Pending members get the rounding error (distributed to last pending)
+            totalForPending = totalForPending.add(roundingError);
+        }
+        
+        // Create shares for all actual members
+        int memberIndex = 0;
+        BigDecimal remainingForMembers = totalForMembers;
+        BigDecimal membersTotal = BigDecimal.ZERO;
+        for (GroupMember member : members) {
+            BigDecimal shareAmount;
+            
+            if (memberIndex == members.size() - 1) {
+                // Last member gets the remainder to ensure exact total
+                shareAmount = remainingForMembers;
+            } else {
+                shareAmount = roundedAmountPerPerson;
+                remainingForMembers = remainingForMembers.subtract(shareAmount);
+            }
+            
+            membersTotal = membersTotal.add(shareAmount);
+            ExpenseShare share = new ExpenseShare(expense, member.getUser(), shareAmount);
+            expenseShareRepository.save(share);
+            memberIndex++;
+        }
+        
+        // Store pending members' shares in description for frontend calculation
+        BigDecimal pendingTotal = BigDecimal.ZERO;
+        if (!pendingMembers.isEmpty()) {
+            StringBuilder pendingSharesStr = new StringBuilder();
+            if (expense.getDescription().contains("(Paid by:")) {
+                pendingSharesStr.append(" (Pending shares: ");
+            } else {
+                pendingSharesStr.append(" (Pending shares: ");
+            }
+            
+            int pendingIndex = 0;
+            BigDecimal remainingForPending = totalForPending;
+            for (PendingGroupMember pending : pendingMembers) {
+                if (pendingIndex > 0) pendingSharesStr.append(", ");
+                
+                BigDecimal pendingShareAmount;
+                if (pendingIndex == pendingMembers.size() - 1) {
+                    // Last pending member gets the remainder to ensure exact total
+                    pendingShareAmount = remainingForPending;
+                } else {
+                    // Use the same rounded amount per person
+                    pendingShareAmount = roundedAmountPerPerson;
+                    remainingForPending = remainingForPending.subtract(pendingShareAmount);
+                }
+                
+                pendingTotal = pendingTotal.add(pendingShareAmount);
+                pendingSharesStr.append(pending.getEmail())
+                        .append(":")
+                        .append(pendingShareAmount.setScale(2, RoundingMode.HALF_UP));
+                pendingIndex++;
+            }
+            pendingSharesStr.append(")");
+            
+            expense.setDescription(expense.getDescription() + pendingSharesStr.toString());
+            expenseRepository.save(expense);
+        }
+        
+        // Validate: membersTotal + pendingTotal should equal expense amount
+        BigDecimal totalShares = membersTotal.add(pendingTotal);
+        BigDecimal difference = expense.getAmount().subtract(totalShares).abs();
+        if (difference.compareTo(new BigDecimal("0.01")) > 0) {
+            // #region agent log
+            try {
+                String logEntry = String.format("{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"O\",\"location\":\"ExpenseService.java:244\",\"message\":\"VALIDATION ERROR: Shares don't sum to expense amount\",\"data\":{\"expenseId\":%d,\"expenseAmount\":%s,\"membersTotal\":%s,\"pendingTotal\":%s,\"totalShares\":%s,\"difference\":%s},\"timestamp\":%d}%n", 
+                    expense.getId(), expense.getAmount(), membersTotal, pendingTotal, totalShares, difference, System.currentTimeMillis());
+                Files.write(Paths.get("c:\\Users\\Tarushlol\\OneDrive\\Desktop\\BillSplitApplication\\.cursor\\debug.log"), logEntry.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (Exception e) {}
+            // #endregion
+            logger.error("VALIDATION ERROR: Expense {} shares don't sum correctly. Expected: {}, Got: {}, Difference: {}", 
+                expense.getId(), expense.getAmount(), totalShares, difference);
+        }
     }
     
     private void createCustomShares(Expense expense, List<ExpenseRequest.ExpenseShareRequest> shareRequests, 
@@ -158,10 +285,10 @@ public class ExpenseService {
         
         // Create shares for actual members
         if (shareRequests != null) {
-            for (ExpenseRequest.ExpenseShareRequest shareRequest : shareRequests) {
-                User user = userRepository.findById(shareRequest.getUserId())
-                        .orElseThrow(() -> new RuntimeException("User not found"));
-                
+        for (ExpenseRequest.ExpenseShareRequest shareRequest : shareRequests) {
+            User user = userRepository.findById(shareRequest.getUserId())
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+            
                 // Include payer's share in custom split
                 ExpenseShare share = new ExpenseShare(expense, user, shareRequest.getAmountOwed());
                 expenseShareRepository.save(share);
