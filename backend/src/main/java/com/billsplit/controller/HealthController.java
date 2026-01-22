@@ -19,11 +19,11 @@ public class HealthController {
     @Autowired(required = false)
     private EmailService emailService;
     
-    @Value("${sendgrid.api.key:}")
-    private String sendgridApiKey;
+    @Value("${brevo.api.key:}")
+    private String brevoApiKey;
     
-    @Value("${sendgrid.from.email:}")
-    private String sendgridFromEmail;
+    @Value("${brevo.from.email:}")
+    private String brevoFromEmail;
     
     @GetMapping
     public ResponseEntity<Map<String, String>> health() {
@@ -31,13 +31,13 @@ public class HealthController {
         response.put("status", "UP");
         response.put("service", "BillSplit Backend");
         
-        // Email configuration status (SendGrid)
-        boolean emailConfigured = sendgridApiKey != null && !sendgridApiKey.trim().isEmpty() 
-            && sendgridFromEmail != null && !sendgridFromEmail.trim().isEmpty();
+        // Email configuration status (Brevo)
+        boolean emailConfigured = brevoApiKey != null && !brevoApiKey.trim().isEmpty() 
+            && brevoFromEmail != null && !brevoFromEmail.trim().isEmpty();
         response.put("email_configured", String.valueOf(emailConfigured));
-        response.put("sendgrid_api_key_set", sendgridApiKey != null && !sendgridApiKey.trim().isEmpty() ? "YES" : "NO");
-        response.put("sendgrid_from_email_set", sendgridFromEmail != null && !sendgridFromEmail.trim().isEmpty() ? "YES" : "NO");
-        response.put("email_provider", "SendGrid API (Free: 100 emails/day)");
+        response.put("brevo_api_key_set", brevoApiKey != null && !brevoApiKey.trim().isEmpty() ? "YES" : "NO");
+        response.put("brevo_from_email_set", brevoFromEmail != null && !brevoFromEmail.trim().isEmpty() ? "YES" : "NO");
+        response.put("email_provider", "Brevo API (Free: 300 emails/day)");
         
         return ResponseEntity.ok(response);
     }

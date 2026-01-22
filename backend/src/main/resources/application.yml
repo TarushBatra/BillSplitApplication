@@ -22,15 +22,15 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
   
-# Email Configuration - Using SendGrid API (HTTP-based, works on Render, FREE tier: 100 emails/day)
-sendgrid:
+# Email Configuration - Using Brevo API (HTTP-based, works on Render, FREE tier: 300 emails/day)
+brevo:
   api:
-    key: ${SENDGRID_API_KEY:}
+    key: ${BREVO_API_KEY:}
   from:
-    email: ${SENDGRID_FROM_EMAIL:}
-    name: ${SENDGRID_FROM_NAME:BillSplit}
+    email: ${BREVO_FROM_EMAIL:}
+    name: ${BREVO_FROM_NAME:BillSplit}
   reply:
-    to: ${SENDGRID_REPLY_TO:}
+    to: ${BREVO_REPLY_TO:}
 
 server:
   port: 8080
