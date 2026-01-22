@@ -31,10 +31,6 @@ resend:
   reply:
     to: ${RESEND_REPLY_TO:}
 
-# Application Branding
-app:
-  name: ${APP_NAME:BillSplit}
-
 server:
   port: 8080
   servlet:
@@ -47,6 +43,7 @@ jwt:
 
 # Application Configuration
 app:
+  name: ${APP_NAME:BillSplit}
   url: ${APP_URL:http://localhost:3000}
 
 # CORS Configuration
